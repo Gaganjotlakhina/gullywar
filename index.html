@@ -4,6 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Gully Warfare — 1v1 Shooter</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0d0b14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Gully Warfare" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" type="image/png" href="icon-192.png" />
 <style>
   :root{
     --bg:#0d0b14; --ink:#f3ead6; --saffron:#ff8a1e; --green:#1fae5a;
@@ -57,13 +65,16 @@
     -webkit-user-select:text;user-select:text;}
   textarea{height:74px;resize:none;word-break:break-all;}
 
-  .step{font-size:11px;text-align:left;line-height:1.7;opacity:.85;margin:6px 0;}
+  .step{font-size:11px;text-align:left;line-height:1.7;opacity:.85;margin:6px 0;display:block;}
   .step b{color:var(--gold);}
   .optionalTag{display:inline-block;font-size:9px;letter-spacing:1px;background:#26324a;
     color:#9ec1ff;border-radius:6px;padding:2px 7px;vertical-align:middle;margin-left:6px;}
   #netStatus{font-size:13px;letter-spacing:1px;color:var(--gold);min-height:18px;}
   .pulse{animation:pulse 1s infinite;}
   @keyframes pulse{50%{opacity:.4;}}
+  .voiceRow{display:flex;align-items:center;gap:8px;justify-content:center;font-size:12px;
+    background:#1a2236;border:1px solid #2a3a5a;border-radius:10px;padding:9px 12px;margin-bottom:4px;}
+  .voiceRow input{width:18px;height:18px;accent-color:var(--green);}
 
   /* ============ HUD ============ */
   #hud{position:absolute;inset:0;z-index:20;pointer-events:none;}
@@ -104,19 +115,24 @@
   #vignette{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .3s;
     background:radial-gradient(70% 70% at 50% 50%, transparent 55%, rgba(200,20,40,.45) 100%);}
 
-  .stick{position:absolute;bottom:26px;width:130px;height:130px;border-radius:50%;
+  .stick{position:absolute;bottom:26px;width:140px;height:140px;border-radius:50%;
     background:rgba(255,255,255,.04);border:1px solid var(--steel2);z-index:25;pointer-events:auto;}
   .stick.left{left:20px;}
   .stick.right{right:20px;}
-  .nub{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;
-    border-radius:50%;background:rgba(243,234,214,.18);border:1px solid rgba(243,234,214,.4);}
+  .nub{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;
+    border-radius:50%;background:rgba(243,234,214,.18);border:1px solid rgba(243,234,214,.4);
+    transition:transform .04s linear;}
   .stick.left .nub{background:rgba(31,174,90,.25);border-color:rgba(31,174,90,.6);}
   .stick.right .nub{background:rgba(255,138,30,.25);border-color:rgba(255,138,30,.6);}
   .tbtn{position:absolute;width:64px;height:64px;border-radius:50%;z-index:26;pointer-events:auto;
     background:rgba(22,18,38,.8);border:1px solid var(--steel2);display:flex;align-items:center;
     justify-content:center;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--ink);
     text-transform:uppercase;text-align:center;}
-  #btnSwap{right:160px;bottom:80px;}
+  #btnSwap{right:172px;bottom:80px;}
+  #btnMic{position:absolute;top:64px;right:12px;z-index:27;pointer-events:auto;
+    background:rgba(22,18,38,.85);border:1px solid var(--green);border-radius:12px;
+    color:var(--ink);font-size:16px;padding:8px 14px;cursor:pointer;font-family:inherit;}
+  #btnMic.muted{border-color:var(--blood);opacity:.7;}
   .desktop-only .stick,.desktop-only .tbtn{display:none;}
   #pauseBtn{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:27;
     pointer-events:auto;background:rgba(22,18,38,.7);border:1px solid var(--steel2);
@@ -125,6 +141,7 @@
 </head>
 <body>
 <canvas id="cv"></canvas>
+<audio id="voiceAudio" autoplay playsinline></audio>
 
 <div id="hud" class="hidden">
   <div id="vignette"></div>
@@ -141,6 +158,7 @@
   <div class="stick left" id="stickL"><div class="nub" id="nubL"></div></div>
   <div class="stick right" id="stickR"><div class="nub" id="nubR"></div></div>
   <div class="tbtn" id="btnSwap">Swap<br>Gun</div>
+  <button id="btnMic" class="hidden">🎤</button>
   <button id="pauseBtn">II PAUSE</button>
 </div>
 
@@ -177,9 +195,10 @@
   <!-- NET PANEL -->
   <div class="panel hidden" id="netPanel">
     <div class="label">Play With a Friend (send codes over WhatsApp / text)</div>
+    <label class="voiceRow"><input type="checkbox" id="voiceChk" checked />
+      🎤 Voice chat — talk to each other while playing (asks mic permission)</label>
     <div class="step" style="text-align:center;opacity:.7;">
       📷 Want your face in the game? Add your photo above first — <b>it's optional</b>.
-      Photos are swapped automatically when you connect.
     </div>
     <div class="row" style="margin:10px 0;">
       <button class="btn small" id="hostBtn">Host a Game</button>
@@ -226,8 +245,9 @@
 <script>
 "use strict";
 //=====================================================================
-//  GULLY WARFARE — English UI build
-//  photo faces (optional for both players) · P2P 1v1 · unlimited ammo
+//  GULLY WARFARE — v5
+//  + voice chat (WebRTC audio) · bigger maps · enemy pings on gunfire
+//  + smoothed joystick movement & aim
 //=====================================================================
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 let W=0,H=0,DPR=1;
@@ -242,14 +262,14 @@ $('controlsTip').innerHTML=isTouch
  ?"Left stick = move · Right stick = aim + auto-fire · Swap Gun button to change weapons."
  :"WASD = move · Mouse = aim · Click = fire · Q or 1/2/3 = swap gun · ESC = pause";
 
-//---------------- GUNS (unlimited ammo, no reload)
+//---------------- GUNS (unlimited ammo)
 const GUNS=[
  {key:'katta',name:'Katta',dmg:24,rof:300,speed:760,spread:.03,pellets:1,color:'#ffd27a',len:14},
  {key:'ak',name:'AK-47',dmg:13,rof:95,speed:900,spread:.07,pellets:1,color:'#ff8a1e',len:22},
  {key:'shot',name:'Dunaali',dmg:11,rof:650,speed:680,spread:.16,pellets:7,color:'#ff5a3c',len:20},
 ];
 
-//---------------- PLAYER PROFILE (photo optional)
+//---------------- PLAYER PROFILE
 const profile={name:'YOU',photo:null,img:null};
 $('photoInput').addEventListener('change',e=>{
   const file=e.target.files[0];if(!file)return;
@@ -266,7 +286,7 @@ $('photoInput').addEventListener('change',e=>{
   };im.src=rd.result;};
   rd.readAsDataURL(file);});
 
-//---------------- PROPS / MAPS
+//---------------- PROPS
 function r2(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);
   ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
 function drawProp(c,m){
@@ -314,54 +334,85 @@ function drawProp(c,m){
       ctx.fillStyle='rgba(255,255,255,.06)';ctx.fillRect(x,y,w,5);}
   ctx.restore();}
 
+//---------------- MAPS (bigger, more cover = harder to find each other)
 const MAPS=[
- {id:'bazaar',name:'Old Bazaar',desc:'Market lane — carts & drums',
+ {id:'bazaar',name:'Old Bazaar',desc:'Big market maze — carts & drums',
   ground:'#2a2418',accent:'#6b5436',wall:'#4a3a22',wallTop:'#5e4a2c',coverColor:'#7a5a2e',
-  size:{w:1600,h:1000},
-  walls:[{x:0,y:0,w:1600,h:30},{x:0,y:970,w:1600,h:30},{x:0,y:0,w:30,h:1000},{x:1570,y:0,w:30,h:1000},
-   {x:300,y:200,w:260,h:40},{x:300,y:200,w:40,h:240},
-   {x:1040,y:760,w:260,h:40},{x:1260,y:520,w:40,h:280},{x:720,y:430,w:160,h:140}],
-  cover:[{x:200,y:620,w:110,h:60,type:'thela'},{x:480,y:760,w:90,h:60,type:'crate'},
-   {x:760,y:120,w:130,h:62,type:'tempo'},{x:1100,y:240,w:60,h:60,type:'barrel'},
-   {x:1300,y:140,w:56,h:56,type:'tree'},{x:560,y:560,w:60,h:60,type:'barrel'},
-   {x:1000,y:560,w:90,h:42,type:'sandbag'},{x:340,y:430,w:56,h:56,type:'tree'}],
-  decor:[{t:'rangoli',x:800,y:880},{t:'stain',x:450,y:300},{t:'stain',x:1200,y:680},
-   {t:'manhole',x:640,y:760},{t:'lamp',x:160,y:380},{t:'lamp',x:1420,y:420}],
-  spawns:[{x:150,y:150},{x:1450,y:850}]},
- {id:'haveli',name:'Haveli Courtyard',desc:'Old mansion — trees & fountain',
+  size:{w:2300,h:1450},
+  walls:[
+   {x:0,y:0,w:2300,h:30},{x:0,y:1420,w:2300,h:30},{x:0,y:0,w:30,h:1450},{x:2270,y:0,w:30,h:1450},
+   {x:420,y:280,w:360,h:40},{x:420,y:280,w:40,h:340},
+   {x:1480,y:1090,w:360,h:40},{x:1800,y:740,w:40,h:390},
+   {x:1020,y:610,w:230,h:200},
+   {x:850,y:1180,w:300,h:40},{x:850,y:200,w:40,h:260},
+   {x:1550,y:230,w:40,h:300},{x:1300,y:430,w:290,h:40},
+   {x:330,y:900,w:40,h:320},{x:330,y:900,w:280,h:40},
+   {x:1950,y:300,w:200,h:40}],
+  cover:[
+   {x:280,y:880,w:110,h:60,type:'thela'},{x:680,y:1080,w:90,h:60,type:'crate'},
+   {x:1080,y:170,w:130,h:62,type:'tempo'},{x:1560,y:340,w:60,h:60,type:'barrel'},
+   {x:1870,y:200,w:56,h:56,type:'tree'},{x:800,y:790,w:60,h:60,type:'barrel'},
+   {x:1430,y:790,w:90,h:42,type:'sandbag'},{x:480,y:610,w:56,h:56,type:'tree'},
+   {x:1960,y:1000,w:110,h:60,type:'thela'},{x:1200,y:1230,w:60,h:60,type:'barrel'},
+   {x:600,y:170,w:90,h:42,type:'sandbag'},{x:2030,y:620,w:70,h:70,type:'crate'},
+   {x:170,y:1230,w:56,h:56,type:'tree'},{x:1700,y:1280,w:56,h:56,type:'tree'}],
+  decor:[{t:'rangoli',x:1150,y:1300},{t:'stain',x:650,y:430},{t:'stain',x:1750,y:980},
+   {t:'manhole',x:920,y:1090},{t:'lamp',x:230,y:550},{t:'lamp',x:2050,y:600},
+   {t:'lamp',x:1150,y:900},{t:'manhole',x:1500,y:200}],
+  spawns:[{x:180,y:180},{x:2120,y:1270}]},
+ {id:'haveli',name:'Haveli Courtyard',desc:'Sprawling mansion — trees & courtyards',
   ground:'#332a2e',accent:'#5a4046',wall:'#5a3038',wallTop:'#6e3c46',coverColor:'#8a5a3a',
-  size:{w:1500,h:1000},
-  walls:[{x:0,y:0,w:1500,h:30},{x:0,y:970,w:1500,h:30},{x:0,y:0,w:30,h:1000},{x:1470,y:0,w:30,h:1000},
-   {x:600,y:430,w:300,h:140},{x:200,y:200,w:40,h:200},{x:1260,y:600,w:40,h:200},
-   {x:200,y:760,w:200,h:40},{x:1100,y:200,w:200,h:40}],
-  cover:[{x:400,y:300,w:60,h:60,type:'tree'},{x:1020,y:620,w:60,h:60,type:'tree'},
-   {x:300,y:560,w:64,h:64,type:'barrel'},{x:1140,y:380,w:70,h:70,type:'crate'},
-   {x:700,y:160,w:100,h:50,type:'sandbag'},{x:700,y:790,w:110,h:55,type:'thela'}],
-  decor:[{t:'rangoli',x:750,y:300},{t:'rangoli',x:750,y:700},{t:'lamp',x:520,y:500},
-   {t:'lamp',x:980,y:500},{t:'stain',x:1100,y:800}],
-  spawns:[{x:120,y:120},{x:1380,y:880}]},
- {id:'chhat',name:'Rooftops',desc:'City rooftops — tanks & lines',
+  size:{w:2150,h:1450},
+  walls:[
+   {x:0,y:0,w:2150,h:30},{x:0,y:1420,w:2150,h:30},{x:0,y:0,w:30,h:1450},{x:2120,y:0,w:30,h:1450},
+   {x:860,y:620,w:430,h:200},
+   {x:290,y:290,w:40,h:290},{x:1810,y:860,w:40,h:290},
+   {x:290,y:1090,w:290,h:40},{x:1580,y:290,w:290,h:40},
+   {x:700,y:200,w:40,h:240},{x:1410,y:1010,w:40,h:240},
+   {x:1100,y:200,w:40,h:220},{x:1010,y:1030,w:40,h:220},
+   {x:480,y:760,w:240,h:40},{x:1430,y:650,w:240,h:40}],
+  cover:[
+   {x:570,y:430,w:60,h:60,type:'tree'},{x:1470,y:890,w:60,h:60,type:'tree'},
+   {x:430,y:800,w:64,h:64,type:'barrel'},{x:1630,y:545,w:70,h:70,type:'crate'},
+   {x:1000,y:230,w:100,h:50,type:'sandbag'},{x:1000,y:1130,w:110,h:55,type:'thela'},
+   {x:240,y:680,w:56,h:56,type:'tree'},{x:1850,y:680,w:56,h:56,type:'tree'},
+   {x:760,y:1030,w:60,h:60,type:'barrel'},{x:1330,y:340,w:60,h:60,type:'barrel'},
+   {x:1750,y:1230,w:90,h:42,type:'sandbag'},{x:300,y:170,w:90,h:42,type:'sandbag'}],
+  decor:[{t:'rangoli',x:1075,y:430},{t:'rangoli',x:1075,y:1010},{t:'lamp',x:740,y:720},
+   {t:'lamp',x:1410,y:720},{t:'stain',x:1580,y:1160},{t:'lamp',x:300,y:950},
+   {t:'manhole',x:1900,y:300}],
+  spawns:[{x:160,y:160},{x:1990,y:1290}]},
+ {id:'chhat',name:'Rooftops',desc:'Huge rooftop sprawl — tanks & lines',
   ground:'#24262e',accent:'#3a3e4a',wall:'#2e3340',wallTop:'#414858',coverColor:'#56607a',
-  size:{w:1500,h:950},
-  walls:[{x:0,y:0,w:1500,h:30},{x:0,y:920,w:1500,h:30},{x:0,y:0,w:30,h:950},{x:1470,y:0,w:30,h:950},
-   {x:450,y:120,w:40,h:300},{x:1010,y:520,w:40,h:300},
-   {x:600,y:600,w:240,h:40},{x:660,y:300,w:240,h:40}],
-  cover:[{x:250,y:550,w:80,h:80,type:'barrel'},{x:1150,y:280,w:80,h:80,type:'barrel'},
-   {x:700,y:120,w:90,h:55,type:'sandbag'},{x:700,y:800,w:90,h:55,type:'sandbag'},
-   {x:300,y:250,w:70,h:70,type:'crate'},{x:1120,y:640,w:70,h:70,type:'crate'}],
-  decor:[{t:'manhole',x:500,y:700},{t:'stain',x:900,y:200},{t:'lamp',x:750,y:475},
-   {t:'clothes',x:380,y:820},{t:'clothes',x:1100,y:140}],
-  spawns:[{x:130,y:130},{x:1370,y:820}]},
+  size:{w:2150,h:1350},
+  walls:[
+   {x:0,y:0,w:2150,h:30},{x:0,y:1320,w:2150,h:30},{x:0,y:0,w:30,h:1350},{x:2120,y:0,w:30,h:1350},
+   {x:640,y:170,w:40,h:430},{x:1450,y:750,w:40,h:430},
+   {x:860,y:860,w:340,h:40},{x:950,y:430,w:340,h:40},
+   {x:300,y:700,w:300,h:40},{x:1550,y:570,w:300,h:40},
+   {x:1130,y:1050,w:40,h:270},{x:980,y:30,w:40,h:240}],
+  cover:[
+   {x:360,y:790,w:80,h:80,type:'barrel'},{x:1650,y:400,w:80,h:80,type:'barrel'},
+   {x:1000,y:170,w:90,h:55,type:'sandbag'},{x:1000,y:1140,w:90,h:55,type:'sandbag'},
+   {x:430,y:360,w:70,h:70,type:'crate'},{x:1600,y:910,w:70,h:70,type:'crate'},
+   {x:200,y:1100,w:80,h:80,type:'barrel'},{x:1870,y:170,w:80,h:80,type:'barrel'},
+   {x:760,y:1000,w:70,h:70,type:'crate'},{x:1300,y:280,w:70,h:70,type:'crate'},
+   {x:1900,y:1100,w:90,h:55,type:'sandbag'},{x:160,y:170,w:90,h:55,type:'sandbag'}],
+  decor:[{t:'manhole',x:720,y:1000},{t:'stain',x:1290,y:290},{t:'lamp',x:1075,y:680},
+   {t:'clothes',x:540,y:1170},{t:'clothes',x:1580,y:200},{t:'clothes',x:1900,y:700},
+   {t:'lamp',x:400,y:300},{t:'lamp',x:1750,y:1050}],
+  spawns:[{x:170,y:170},{x:1980,y:1180}]},
 ];
 
 //---------------- STATE
 let G=null,selMap=0,selDiff=1,mode='bot';
 const ROUNDS_TO_WIN=3;
 const BOT_NAMES=['ROOKIE AI','STREET AI','BOSS AI'];
+const PING_MS=1600; // enemy stays on minimap this long after firing
 
-//---------------- NETWORK (WebRTC, manual signaling — no server needed)
+//---------------- NETWORK + VOICE
 const net={pc:null,dc:null,connected:false,isHost:false,foeName:'FRIEND',foePhoto:null,foeImg:null,
-  lastSend:0,foeTarget:null};
+  lastSend:0,foeTarget:null,localStream:null,voiceWanted:true};
 const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
 function setNetStatus(t,pulse){const el=$('netStatus');el.textContent=t;
   el.classList.toggle('pulse',!!pulse);}
@@ -370,6 +421,18 @@ function waitIce(pc){return new Promise(res=>{
   const h=()=>{if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',h);res();}};
   pc.addEventListener('icegatheringstatechange',h);
   setTimeout(res,3500);});}
+async function setupVoice(){
+  net.voiceWanted=$('voiceChk').checked;
+  if(!net.voiceWanted)return;
+  try{
+    net.localStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    net.localStream.getTracks().forEach(tr=>net.pc.addTrack(tr,net.localStream));
+  }catch(err){
+    net.localStream=null;
+    setNetStatus('🎤 Mic not allowed — playing without voice',false);
+  }}
+function bindPCAudio(){
+  net.pc.ontrack=e=>{$('voiceAudio').srcObject=e.streams[0];$('voiceAudio').play().catch(()=>{});};}
 function bindDC(){
   net.dc.onopen=()=>{net.connected=true;setNetStatus('✅ Connected! Starting...',false);
     sendNet({t:'hi',name:profile.name||'FRIEND',photo:profile.photo,map:selMap});};
@@ -379,7 +442,8 @@ function bindDC(){
   net.dc.onmessage=e=>handleNet(JSON.parse(e.data));}
 async function hostCreate(){
   setNetStatus('Generating invite code...',true);
-  net.pc=new RTCPeerConnection(ICE);net.isHost=true;
+  net.pc=new RTCPeerConnection(ICE);net.isHost=true;bindPCAudio();
+  await setupVoice();
   net.dc=net.pc.createDataChannel('g');bindDC();
   const off=await net.pc.createOffer();await net.pc.setLocalDescription(off);
   await waitIce(net.pc);
@@ -395,9 +459,10 @@ async function joinMakeAnswer(){
   try{const code=$('hostCode').value.trim();
     if(!code)return setNetStatus('Paste the host\'s invite code first',false);
     setNetStatus('Generating reply code...',true);
-    net.pc=new RTCPeerConnection(ICE);net.isHost=false;
+    net.pc=new RTCPeerConnection(ICE);net.isHost=false;bindPCAudio();
     net.pc.ondatachannel=e=>{net.dc=e.channel;bindDC();};
     await net.pc.setRemoteDescription(JSON.parse(atob(code)));
+    await setupVoice();
     const ans=await net.pc.createAnswer();await net.pc.setLocalDescription(ans);
     await waitIce(net.pc);
     $('myAnswer').value=btoa(JSON.stringify(net.pc.localDescription));
@@ -408,7 +473,7 @@ function handleNet(m){
   if(m.t==='hi'){
     net.foeName=m.name||'FRIEND';
     if(m.photo){net.foePhoto=m.photo;const im=new Image();im.src=m.photo;net.foeImg=im;}
-    else{net.foePhoto=null;net.foeImg=null;} // friend skipped photo — default character
+    else{net.foePhoto=null;net.foeImg=null;}
     if(!net.isHost&&typeof m.map==='number')selMap=m.map;
     if(!G||G.state!=='play'){startGame();}
     if(G){G.foe.name=net.foeName;G.foe.photoImg=net.foeImg;updateHUD();applyAvatars();}
@@ -417,7 +482,7 @@ function handleNet(m){
   else if(m.t==='s'){
     net.foeTarget={x:m.x,y:m.y};
     G.foe.angle=m.a;G.foe.walk=m.w;G.foe.moving=m.m;G.foe.gun=m.g;}
-  else if(m.t==='f'){spawnShot(G.foe,m.a);}
+  else if(m.t==='f'){G.foe.lastShot=G.t;spawnShot(G.foe,m.a);}
   else if(m.t==='hp'){G.foe.hp=m.hp;G.foe.hitT=G.t;updateHUD();}
   else if(m.t==='die'){if(G.roundActive)endRound(true);}
 }
@@ -429,6 +494,15 @@ $('hostBtn').onclick=()=>{$('hostFlow').classList.remove('hidden');$('joinFlow')
 $('joinBtn').onclick=()=>{$('joinFlow').classList.remove('hidden');$('hostFlow').classList.add('hidden');setNetStatus('',false);};
 $('connectBtn').onclick=hostAccept;
 $('makeAnswerBtn').onclick=joinMakeAnswer;
+// mic mute toggle
+$('btnMic').addEventListener('click',toggleMic);
+$('btnMic').addEventListener('touchstart',e=>{e.preventDefault();toggleMic();},{passive:false});
+function toggleMic(){
+  if(!net.localStream)return;
+  const tr=net.localStream.getAudioTracks()[0];if(!tr)return;
+  tr.enabled=!tr.enabled;
+  $('btnMic').textContent=tr.enabled?'🎤':'🔇';
+  $('btnMic').classList.toggle('muted',!tr.enabled);}
 
 //---------------- INPUT
 const keys={};
@@ -443,19 +517,23 @@ cv.addEventListener('mousedown',()=>mouse.down=true);
 cv.addEventListener('mouseup',()=>mouse.down=false);
 const stickL=$('stickL'),nubL=$('nubL'),stickR=$('stickR'),nubR=$('nubR');
 const joy={l:{active:false,id:null,dx:0,dy:0},r:{active:false,id:null,dx:0,dy:0,fire:false}};
-function bindStick(el,nub,j){const R=46;
+function bindStick(el,nub,j){const R=50;
   el.addEventListener('touchstart',e=>{e.preventDefault();const t=e.changedTouches[0];
-    j.active=true;j.id=t.identifier;const b=el.getBoundingClientRect();el._cx=b.left+65;el._cy=b.top+65;mv(t);},{passive:false});
+    j.active=true;j.id=t.identifier;const b=el.getBoundingClientRect();el._cx=b.left+70;el._cy=b.top+70;mv(t);},{passive:false});
   el.addEventListener('touchmove',e=>{e.preventDefault();
     for(const t of e.changedTouches)if(t.identifier===j.id)mv(t);},{passive:false});
   el.addEventListener('touchend',e=>{e.preventDefault();
     for(const t of e.changedTouches)if(t.identifier===j.id){
       j.active=false;j.id=null;j.dx=0;j.dy=0;j.fire=false;nub.style.transform='';}},{passive:false});
   function mv(t){let dx=t.clientX-el._cx,dy=t.clientY-el._cy;const d=Math.hypot(dx,dy)||1,cl=Math.min(d,R);
-    nub.style.transform=`translate(${dx/d*cl}px,${dy/d*cl}px)`;j.dx=dx/R;j.dy=dy/R;j.fire=d>22;}}
+    nub.style.transform=`translate(${dx/d*cl}px,${dy/d*cl}px)`;j.dx=dx/R;j.dy=dy/R;j.fire=d>20;}}
 bindStick(stickL,nubL,joy.l);bindStick(stickR,nubR,joy.r);
 $('btnSwap').addEventListener('touchstart',e=>{e.preventDefault();
   if(G)selectGun(G.me,(G.me.gun+1)%GUNS.length);},{passive:false});
+
+// smoothed input state (filled each frame)
+const inp={mx:0,my:0,aim:0,aimSet:false};
+function lerpAngle(a,b,t){let d=((b-a+Math.PI*3)%(Math.PI*2))-Math.PI;return a+d*t;}
 
 //---------------- HELPERS
 const rand=(a,b)=>a+Math.random()*(b-a);
@@ -468,7 +546,7 @@ function segBlocked(x1,y1,x2,y2,solids){const steps=Math.ceil(Math.hypot(x2-x1,y
 //---------------- ENTITIES
 function makeFighter(spawn,isBot,name){
   return{x:spawn.x,y:spawn.y,r:15,hp:100,maxhp:100,angle:0,
-    speed:isBot?2.4:2.9,gun:0,lastShot:0,isBot,name,
+    speed:isBot?2.4:2.9,gun:0,lastShot:-99999,isBot,name,
     walk:0,moving:false,hitT:0,
     skin:isBot?'#a4714e':'#c08a5e',shirt:isBot?'#7a1f2c':'#1d6e42',
     pant:isBot?'#26222e':'#2c3550',head:isBot?'#1c1622':'#e8a020',pagdi:!isBot,
@@ -485,10 +563,12 @@ function startGame(){
     bullets:[],parts:[],floaters:[],scoreMe:0,scoreFoe:0,
     cam:{x:0,y:0},shake:0,roundActive:true,roundEndT:0,t:0};
   G.me.photoImg=profile.img;
+  inp.mx=0;inp.my=0;inp.aimSet=false;
   if(mode==='net'){G.foe.photoImg=net.foeImg;G.foe.shirt='#7a1f2c';G.foe.pagdi=false;}
   $('menu').classList.add('hidden');$('over').classList.add('hidden');
   $('pause').classList.add('hidden');$('hud').classList.remove('hidden');
   $('meName').textContent=G.me.name;$('foeName').textContent=G.foe.name;
+  $('btnMic').classList.toggle('hidden',!(mode==='net'&&net.localStream));
   applyAvatars();
   showRoundMsg('Round 1 — Fight!');updateHUD();}
 function applyAvatars(){
@@ -501,17 +581,17 @@ function resetRound(){
   G.me.x=G.map.spawns[G.mySpawn].x;G.me.y=G.map.spawns[G.mySpawn].y;
   G.foe.x=G.map.spawns[G.foeSpawn].x;G.foe.y=G.map.spawns[G.foeSpawn].y;
   net.foeTarget=null;
-  for(const f of[G.me,G.foe])f.hp=f.maxhp;
+  for(const f of[G.me,G.foe]){f.hp=f.maxhp;f.lastShot=-99999;}
   G.bullets.length=0;G.roundActive=true;
   showRoundMsg('Round '+(G.scoreMe+G.scoreFoe+1)+' — Fight!');updateHUD();}
 
-//---------------- SHOOTING (unlimited ammo)
+//---------------- SHOOTING
 function selectGun(f,i){f.gun=i;if(f===G.me)updateHUD();}
 function spawnShot(f,baseAngle){
   const g=GUNS[f.gun];
   for(let p=0;p<g.pellets;p++){const a=baseAngle+rand(-g.spread,g.spread)*(g.pellets>1?3:1);
     G.bullets.push({x:f.x+Math.cos(baseAngle)*22,y:f.y+Math.sin(baseAngle)*22,
-      vx:Math.cos(a)*g.speed,vy:Math.sin(a)*g.speed,dmg:g.dmg,owner:f,life:1.1,color:g.color});}
+      vx:Math.cos(a)*g.speed,vy:Math.sin(a)*g.speed,dmg:g.dmg,owner:f,life:1.3,color:g.color});}
   for(let i=0;i<4;i++)G.parts.push({x:f.x+Math.cos(baseAngle)*24,y:f.y+Math.sin(baseAngle)*24,
     vx:Math.cos(baseAngle)*rand(2,5)+rand(-1,1),vy:Math.sin(baseAngle)*rand(2,5)+rand(-1,1),
     life:.12,max:.12,r:rand(3,6),c:'#ffd27a'});}
@@ -522,11 +602,14 @@ function tryShoot(f){const g=GUNS[f.gun];
   if(f===G.me){G.shake=Math.min(G.shake+(g.pellets>1?7:3),12);
     if(G.mode==='net')sendNet({t:'f',a:f.angle});}}
 
-//---------------- MOVE
+//---------------- MOVE (analog speed for smooth feel)
 function moveFighter(f,dx,dy){const len=Math.hypot(dx,dy);
-  f.moving=len>0.1;if(len>0){dx/=len;dy/=len;}
-  if(f.moving)f.walk+=0.22;
-  let nx=f.x+dx*f.speed,ny=f.y+dy*f.speed;
+  f.moving=len>0.12;
+  let nx=f.x,ny=f.y;
+  if(len>0.04){
+    const cl=Math.min(1,len);
+    nx=f.x+dx/len*f.speed*cl;ny=f.y+dy/len*f.speed*cl;
+    if(f.moving)f.walk+=0.22*cl;}
   if(!G.solids.some(s=>circleRect(nx,f.y,f.r,s)))f.x=nx;
   if(!G.solids.some(s=>circleRect(f.x,ny,f.r,s)))f.y=ny;
   const m=G.map.size;f.x=Math.max(f.r,Math.min(m.w-f.r,f.x));f.y=Math.max(f.r,Math.min(m.h-f.r,f.y));}
@@ -560,13 +643,26 @@ requestAnimationFrame(loop);
 
 function update(dt){
   G.t+=dt*1000;
-  let dx=0,dy=0;
-  if(isTouch){dx=joy.l.dx;dy=joy.l.dy;
-    if(joy.r.active){G.me.angle=Math.atan2(joy.r.dy,joy.r.dx);if(joy.r.fire)tryShoot(G.me);}}
-  else{if(keys['w'])dy-=1;if(keys['s'])dy+=1;if(keys['a'])dx-=1;if(keys['d'])dx+=1;
-    G.me.angle=Math.atan2(mouse.y-(G.me.y-G.cam.y),mouse.x-(G.me.x-G.cam.x));
-    if(mouse.down)tryShoot(G.me);}
-  if(G.roundActive)moveFighter(G.me,dx,dy);else G.me.moving=false;
+
+  // --- smoothed player input ---
+  let tx=0,ty=0,wantFire=false,targetAim=null;
+  if(isTouch){
+    tx=joy.l.dx;ty=joy.l.dy;
+    if(joy.r.active){targetAim=Math.atan2(joy.r.dy,joy.r.dx);wantFire=joy.r.fire;}
+  }else{
+    if(keys['w'])ty-=1;if(keys['s'])ty+=1;if(keys['a'])tx-=1;if(keys['d'])tx+=1;
+    targetAim=Math.atan2(mouse.y-(G.me.y-G.cam.y),mouse.x-(G.me.x-G.cam.x));
+    wantFire=mouse.down;}
+  // movement smoothing (lerp toward target stick value)
+  inp.mx+=(tx-inp.mx)*0.32;
+  inp.my+=(ty-inp.my)*0.32;
+  // aim smoothing (angular lerp — no snappy jumps)
+  if(targetAim!==null){
+    if(!inp.aimSet){inp.aim=targetAim;inp.aimSet=true;}
+    inp.aim=lerpAngle(inp.aim,targetAim,isTouch?0.38:0.55);
+    G.me.angle=inp.aim;}
+  if(wantFire)tryShoot(G.me);
+  if(G.roundActive)moveFighter(G.me,inp.mx,inp.my);else G.me.moving=false;
 
   if(G.mode==='bot'){
     if(G.roundActive)updateBot(G.foe,G.me);else G.foe.moving=false;
@@ -762,7 +858,7 @@ function drawHuman(f){
   ctx.strokeStyle=col;
   ctx.beginPath();ctx.arc(f.x,f.y,f.r+9,-Math.PI/2,-Math.PI/2+Math.PI*2*(Math.max(0,f.hp)/f.maxhp));ctx.stroke();}
 
-//---------------- MINIMAP
+//---------------- MINIMAP (enemy only pings when they FIRE)
 function drawMinimap(){
   const m=G.map,MW=150,scale=Math.min(MW/m.size.w,MW/m.size.h);
   const mw=m.size.w*scale,mh=m.size.h*scale,ox=W-mw-14,oy=72;
@@ -774,9 +870,18 @@ function drawMinimap(){
   for(const s of m.walls)ctx.fillRect(ox+s.x*scale,oy+s.y*scale,Math.max(1,s.w*scale),Math.max(1,s.h*scale));
   ctx.fillStyle=m.coverColor;
   for(const c of m.cover)ctx.fillRect(ox+c.x*scale,oy+c.y*scale,Math.max(2,c.w*scale),Math.max(2,c.h*scale));
+  // me: always visible
   ctx.fillStyle='#1fae5a';ctx.beginPath();ctx.arc(ox+G.me.x*scale,oy+G.me.y*scale,4,0,7);ctx.fill();
-  if(Math.floor(G.t/400)%2===0){ctx.fillStyle='#e23a4a';
-    ctx.beginPath();ctx.arc(ox+G.foe.x*scale,oy+G.foe.y*scale,4,0,7);ctx.fill();}
+  // enemy: only visible for a moment after they fire (hunt them by sound!)
+  const sinceShot=G.t-G.foe.lastShot;
+  if(sinceShot<PING_MS){
+    const fade=1-sinceShot/PING_MS;
+    ctx.globalAlpha=.88*fade;
+    ctx.fillStyle='#e23a4a';
+    ctx.beginPath();ctx.arc(ox+G.foe.x*scale,oy+G.foe.y*scale,4+fade*3,0,7);ctx.fill();
+    ctx.strokeStyle='#e23a4a';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(ox+G.foe.x*scale,oy+G.foe.y*scale,6+(1-fade)*8,0,7);ctx.stroke();
+    ctx.globalAlpha=.88;}
   ctx.restore();}
 
 //---------------- HUD
@@ -835,6 +940,13 @@ $('resumeBtn').onclick=togglePause;
 $('quitBtn').onclick=quitToMenu;
 $('pauseBtn').onclick=togglePause;
 $('nameInput').addEventListener('input',()=>{profile.name=$('nameInput').value.trim().toUpperCase()||'YOU';});
+
+//---------------- PWA
+if('serviceWorker' in navigator){
+  addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
 </script>
 </body>
 </html>
