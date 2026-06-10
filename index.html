@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="Gully Warfare" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="icon" type="image/png" href="icon-192.png" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
 <style>
   :root{
     --bg:#0d0b14; --ink:#f3ead6; --saffron:#ff8a1e; --green:#1fae5a;
@@ -194,35 +195,30 @@
 
   <!-- NET PANEL -->
   <div class="panel hidden" id="netPanel">
-    <div class="label">Play With a Friend (send codes over WhatsApp / text)</div>
+    <div class="label">Play With a Friend — 4-digit room code</div>
     <label class="voiceRow"><input type="checkbox" id="voiceChk" checked />
       🎤 Voice chat — talk to each other while playing (asks mic permission)</label>
     <div class="step" style="text-align:center;opacity:.7;">
       📷 Want your face in the game? Add your photo above first — <b>it's optional</b>.
     </div>
     <div class="row" style="margin:10px 0;">
-      <button class="btn small" id="hostBtn">Host a Game</button>
-      <button class="btn small ghost" id="joinBtn">Join a Game</button>
+      <button class="btn small" id="hostBtn">Create Room</button>
+      <button class="btn small ghost" id="joinBtn">Join Room</button>
     </div>
     <div id="hostFlow" class="hidden">
-      <div class="step"><b>Step 1:</b> Copy the invite code below and send it to your friend.</div>
-      <textarea id="myCode" readonly placeholder="Generating code..."></textarea>
-      <button class="btn small ghost" id="copyMyCode" style="margin:8px 0;">📋 Copy Invite Code</button>
-      <div class="step"><b>Step 2:</b> Paste the reply code your friend sends back:</div>
-      <textarea id="theirCode" placeholder="Paste friend's reply code here"></textarea>
-      <button class="btn small" id="connectBtn" style="margin-top:8px;">🔗 Connect &amp; Play</button>
+      <div class="step" style="text-align:center;">Your room code — tell it to your friend:</div>
+      <div id="roomCode" style="font-size:44px;font-weight:800;letter-spacing:12px;color:var(--gold);
+        text-shadow:0 0 24px rgba(233,196,106,.4);margin:6px 0;">····</div>
+      <div class="step" style="text-align:center;opacity:.7;">Game starts automatically when they join. 🚀</div>
     </div>
     <div id="joinFlow" class="hidden">
-      <div class="step"><b>Step 1 (optional):</b> Add your photo &amp; name above if you want your face on your character.</div>
-      <div class="step"><b>Step 2:</b> Paste the invite code your friend sent you:</div>
-      <textarea id="hostCode" placeholder="Paste host's invite code here"></textarea>
-      <button class="btn small" id="makeAnswerBtn" style="margin-top:8px;">Generate Reply Code</button>
-      <div class="step"><b>Step 3:</b> Copy this reply code and send it back. The game starts when they hit Connect.</div>
-      <textarea id="myAnswer" readonly></textarea>
-      <button class="btn small ghost" id="copyMyAnswer" style="margin-top:8px;">📋 Copy Reply Code</button>
+      <div class="step" style="text-align:center;">Enter your friend's 4-digit room code:</div>
+      <input type="text" id="joinCode" maxlength="4" inputmode="numeric" pattern="[0-9]*"
+        placeholder="e.g. 4827" style="font-size:26px;text-align:center;letter-spacing:10px;font-weight:800;" />
+      <button class="btn small" id="joinGoBtn" style="margin-top:10px;">Join Game</button>
     </div>
     <div id="netStatus"></div>
-    <div class="tip">Works best when both phones are on the same Wi-Fi. On different networks it may sometimes fail to connect.</div>
+    <div class="tip">Both players just need internet — no copy-paste, no same Wi-Fi needed (usually).</div>
   </div>
 
   <button class="btn" id="playBtn">Play</button>
@@ -410,65 +406,83 @@ const ROUNDS_TO_WIN=3;
 const BOT_NAMES=['ROOKIE AI','STREET AI','BOSS AI'];
 const PING_MS=1600; // enemy stays on minimap this long after firing
 
-//---------------- NETWORK + VOICE
-const net={pc:null,dc:null,connected:false,isHost:false,foeName:'FRIEND',foePhoto:null,foeImg:null,
-  lastSend:0,foeTarget:null,localStream:null,voiceWanted:true};
-const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
+//---------------- NETWORK + VOICE (PeerJS: 4-digit room codes)
+let peer=null;
+const net={conn:null,connected:false,isHost:false,foeName:'FRIEND',foePhoto:null,foeImg:null,
+  lastSend:0,foeTarget:null,localStream:null,gotCall:false};
 function setNetStatus(t,pulse){const el=$('netStatus');el.textContent=t;
   el.classList.toggle('pulse',!!pulse);}
-function waitIce(pc){return new Promise(res=>{
-  if(pc.iceGatheringState==='complete')return res();
-  const h=()=>{if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',h);res();}};
-  pc.addEventListener('icegatheringstatechange',h);
-  setTimeout(res,3500);});}
-async function setupVoice(){
-  net.voiceWanted=$('voiceChk').checked;
-  if(!net.voiceWanted)return;
-  try{
-    net.localStream=await navigator.mediaDevices.getUserMedia({audio:true});
-    net.localStream.getTracks().forEach(tr=>net.pc.addTrack(tr,net.localStream));
-  }catch(err){
-    net.localStream=null;
-    setNetStatus('🎤 Mic not allowed — playing without voice',false);
-  }}
-function bindPCAudio(){
-  net.pc.ontrack=e=>{$('voiceAudio').srcObject=e.streams[0];$('voiceAudio').play().catch(()=>{});};}
-function bindDC(){
-  net.dc.onopen=()=>{net.connected=true;setNetStatus('✅ Connected! Starting...',false);
-    sendNet({t:'hi',name:profile.name||'FRIEND',photo:profile.photo,map:selMap});};
-  net.dc.onclose=()=>{net.connected=false;
+function makeCode(){return String(Math.floor(1000+Math.random()*9000));}
+async function getMic(){
+  if(!$('voiceChk').checked){net.localStream=null;return;}
+  if(net.localStream)return;
+  try{net.localStream=await navigator.mediaDevices.getUserMedia({audio:true});}
+  catch(e){net.localStream=null;
+    setNetStatus('🎤 Mic blocked — no voice, game still works',false);}}
+function playRemote(s){$('voiceAudio').srcObject=s;$('voiceAudio').play().catch(()=>{});}
+function answerCalls(){
+  peer.on('call',call=>{net.gotCall=true;
+    call.answer(net.localStream||undefined);
+    call.on('stream',playRemote);});}
+function bindConn(){
+  net.conn.on('open',()=>{net.connected=true;
+    setNetStatus('✅ Connected! Starting...',false);
+    net.conn.send({t:'hi',name:profile.name||'FRIEND',photo:profile.photo,map:selMap});
+    // voice fallback: if host has mic but never got called, host calls the joiner
+    if(net.isHost&&net.localStream)setTimeout(()=>{
+      if(!net.gotCall){const c=peer.call(net.conn.peer,net.localStream);
+        if(c)c.on('stream',playRemote);}},2500);
+  });
+  net.conn.on('data',d=>handleNet(d));
+  net.conn.on('close',()=>{net.connected=false;
     if(G&&G.state==='play'){showRoundMsg('Friend disconnected 😢');setTimeout(()=>quitToMenu(),1500);}
-    setNetStatus('❌ Connection lost',false);};
-  net.dc.onmessage=e=>handleNet(JSON.parse(e.data));}
-async function hostCreate(){
-  setNetStatus('Generating invite code...',true);
-  net.pc=new RTCPeerConnection(ICE);net.isHost=true;bindPCAudio();
-  await setupVoice();
-  net.dc=net.pc.createDataChannel('g');bindDC();
-  const off=await net.pc.createOffer();await net.pc.setLocalDescription(off);
-  await waitIce(net.pc);
-  $('myCode').value=btoa(JSON.stringify(net.pc.localDescription));
-  setNetStatus('Invite code ready — send it to your friend',false);}
-async function hostAccept(){
-  try{const code=$('theirCode').value.trim();
-    if(!code)return setNetStatus('Paste your friend\'s reply code first',false);
-    await net.pc.setRemoteDescription(JSON.parse(atob(code)));
-    setNetStatus('Connecting...',true);
-  }catch(err){setNetStatus('That code looks wrong — paste it again',false);}}
-async function joinMakeAnswer(){
-  try{const code=$('hostCode').value.trim();
-    if(!code)return setNetStatus('Paste the host\'s invite code first',false);
-    setNetStatus('Generating reply code...',true);
-    net.pc=new RTCPeerConnection(ICE);net.isHost=false;bindPCAudio();
-    net.pc.ondatachannel=e=>{net.dc=e.channel;bindDC();};
-    await net.pc.setRemoteDescription(JSON.parse(atob(code)));
-    await setupVoice();
-    const ans=await net.pc.createAnswer();await net.pc.setLocalDescription(ans);
-    await waitIce(net.pc);
-    $('myAnswer').value=btoa(JSON.stringify(net.pc.localDescription));
-    setNetStatus('Reply code ready — send it back, then wait for them to connect',false);
-  }catch(err){setNetStatus('That code looks wrong — paste it again',false);}}
-function sendNet(o){if(net.dc&&net.dc.readyState==='open')net.dc.send(JSON.stringify(o));}
+    setNetStatus('❌ Connection lost',false);});
+  net.conn.on('error',()=>setNetStatus('⚠️ Connection error — try again',false));}
+async function hostStart(){
+  setNetStatus('Creating room...',true);
+  await getMic();
+  tryHostId();}
+function tryHostId(){
+  const code=makeCode();
+  if(peer){peer.destroy();peer=null;}
+  peer=new Peer('gullywar-'+code);
+  peer.on('open',()=>{net.isHost=true;
+    $('roomCode').textContent=code;
+    setNetStatus('Waiting for your friend to join...',true);});
+  peer.on('connection',c=>{net.conn=c;bindConn();});
+  answerCalls();
+  peer.on('error',e=>{
+    if(e.type==='unavailable-id')tryHostId(); // code taken — roll a new one
+    else if(e.type==='network')setNetStatus('⚠️ Network issue — check internet & try again',false);
+    else if(e.type!=='peer-unavailable')setNetStatus('⚠️ Error: '+e.type,false);});}
+async function joinStart(){
+  const code=$('joinCode').value.trim();
+  if(!/^\d{4}$/.test(code))return setNetStatus('Enter the 4-digit code',false);
+  setNetStatus('Joining room '+code+'...',true);
+  await getMic();
+  if(peer){peer.destroy();peer=null;}
+  peer=new Peer();
+  peer.on('open',()=>{
+    net.isHost=false;
+    net.conn=peer.connect('gullywar-'+code,{reliable:true});
+    bindConn();
+    if(net.localStream){
+      const call=peer.call('gullywar-'+code,net.localStream);
+      if(call)call.on('stream',playRemote);}
+  });
+  answerCalls();
+  peer.on('error',e=>{
+    if(e.type==='peer-unavailable')
+      setNetStatus('❌ No room with code '+code+' — double-check with your friend',false);
+    else if(e.type==='network')setNetStatus('⚠️ Network issue — check internet & try again',false);
+    else setNetStatus('⚠️ Error: '+e.type,false);});}
+function netCleanup(){
+  if(peer){peer.destroy();peer=null;}
+  net.conn=null;net.connected=false;net.gotCall=false;
+  if(net.localStream){net.localStream.getTracks().forEach(t=>t.stop());net.localStream=null;}
+  $('voiceAudio').srcObject=null;
+  $('roomCode').textContent='····';}
+function sendNet(o){if(net.conn&&net.conn.open)net.conn.send(o);}
 function handleNet(m){
   if(m.t==='hi'){
     net.foeName=m.name||'FRIEND';
@@ -486,14 +500,10 @@ function handleNet(m){
   else if(m.t==='hp'){G.foe.hp=m.hp;G.foe.hitT=G.t;updateHUD();}
   else if(m.t==='die'){if(G.roundActive)endRound(true);}
 }
-function copyText(ta){ta.select();ta.setSelectionRange(0,999999);
-  try{navigator.clipboard.writeText(ta.value);}catch(e){document.execCommand('copy');}}
-$('copyMyCode').onclick=()=>copyText($('myCode'));
-$('copyMyAnswer').onclick=()=>copyText($('myAnswer'));
-$('hostBtn').onclick=()=>{$('hostFlow').classList.remove('hidden');$('joinFlow').classList.add('hidden');hostCreate();};
+$('hostBtn').onclick=()=>{$('hostFlow').classList.remove('hidden');$('joinFlow').classList.add('hidden');hostStart();};
 $('joinBtn').onclick=()=>{$('joinFlow').classList.remove('hidden');$('hostFlow').classList.add('hidden');setNetStatus('',false);};
-$('connectBtn').onclick=hostAccept;
-$('makeAnswerBtn').onclick=joinMakeAnswer;
+$('joinGoBtn').onclick=joinStart;
+$('joinCode').addEventListener('keydown',e=>{if(e.key==='Enter')joinStart();});
 // mic mute toggle
 $('btnMic').addEventListener('click',toggleMic);
 $('btnMic').addEventListener('touchstart',e=>{e.preventDefault();toggleMic();},{passive:false});
@@ -912,7 +922,8 @@ function togglePause(){
   if(G.state==='play'){G.state='pause';$('pause').classList.remove('hidden');}
   else if(G.state==='pause'){G.state='play';$('pause').classList.add('hidden');last=performance.now();}}
 function quitToMenu(){$('pause').classList.add('hidden');$('over').classList.add('hidden');
-  $('hud').classList.add('hidden');$('menu').classList.remove('hidden');G=null;}
+  $('hud').classList.add('hidden');$('menu').classList.remove('hidden');G=null;
+  if(mode==='net')netCleanup();}
 
 //---------------- MENU
 const mapRow=$('mapRow');
